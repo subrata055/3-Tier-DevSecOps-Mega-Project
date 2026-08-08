@@ -13,23 +13,50 @@ pipeline {
             }
         }
 
+    stage('SonarQube Analysis') {
+            steps {
+                echo '==> Stage 2: Running SonarQube Code Scan...'
+                script {
+                    def scannerHome = tool 'SonarScanner'
+                    withSonarQubeEnv('SonarQube-Server') {
+                        sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                echo '==> Stage 3: Checking Quality Gate Status...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    // Waits for SonarQube webhook to return status back to Jenkins
+                    script {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
-                echo '==> Stage 2: Building container images using Docker Compose...'
+                echo '==> Stage 4: Building container images using Docker Compose...'
                 sh 'docker compose build'
             }
         }
 
         stage('Clean Old Container') {
             steps {
-                echo '==> Stage 3: Stopping and removing old container instances...'
+                echo '==> Stage 5: Stopping and removing old container instances...'
                 sh 'docker compose down --volumes --remove-orphans || true'
             }
         }
 
         stage('Deployment') {
             steps {
-                echo '==> Stage 4: Deploying new containers in detached mode...'
+                echo '==> Stage 6: Deploying new containers in detached mode...'
                 sh 'docker compose up -d'
                 sh 'docker compose ps'
             }
