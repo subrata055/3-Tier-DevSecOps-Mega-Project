@@ -1,0 +1,103 @@
+pipeline {
+    agent any
+
+    environment {
+        PATH = "/usr/local/bin:/usr/bin:/bin:${env.PATH}"
+        AWS_REGION = "us-east-1"                     // Update with your AWS Region
+        ECR_REGISTRY = "123456789012.dkr.ecr.us-east-1.amazonaws.com" // Update with your AWS Account ID & Region
+        AWS_CREDENTIALS_ID = "aws-ecr-credentials"   // Jenkins AWS Credential ID (Secret Text / AWS Credentials)
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                echo '==> Stage 1: Checking out code from repository...'
+                checkout scm
+            }
+        }
+
+        stage('Trivy FS Scan') {
+            steps {
+                echo '==> Stage 2: Scanning source code repository with Trivy...'
+                sh 'trivy fs --severity HIGH,CRITICAL .'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                echo '==> Stage 3: Running SonarQube Code Scan...'
+                script {
+                    def scannerHome = tool 'SonarScanner'
+                    withSonarQubeEnv('SonarQube-Server') {
+                        sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                echo '==> Stage 4: Checking Quality Gate Status...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    script {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('OWASP Dependency Scan') {
+            steps {
+                echo '==> Stage 5: Running OWASP Dependency-Check...'
+                dependencyCheck additionalArguments: '--scan ./ --format HTML --format XML', odcInstallation: 'OWASP-Dependency-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo '==> Stage 6: Building container images using Docker Compose...'
+                sh 'docker compose build'
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                echo '==> Stage 7: Scanning built Docker images with Trivy...'
+                sh 'trivy image --severity HIGH,CRITICAL 3-tier-devsecops-mega-project-frontend:latest || true'
+                sh 'trivy image --severity HIGH,CRITICAL 3-tier-devsecops-mega-project-backend:latest || true'
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                echo '==> Stage 8: Tagging and pushing images to AWS ECR...'
+                script {
+                    // Authenticate Docker with AWS ECR
+                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                    
+                    // Tag Images for ECR
+                    sh "docker tag 3-tier-devsecops-mega-project-frontend:latest ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
+                    sh "docker tag 3-tier-devsecops-mega-project-backend:latest ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+                    
+                    // Push Images to ECR
+                    sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
+                    sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+                }
+            }
+        }
+
+    post {
+        always {
+            echo '==> Cleaning up dangling/intermediate build images...'
+            sh 'docker image prune -f || true'
+        }
+        failure {
+            echo '==> Deployment failed! Fetching container logs...'
+            sh 'docker compose logs --tail=50'
+        }
+    }
+}
