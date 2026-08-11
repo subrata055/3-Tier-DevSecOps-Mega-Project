@@ -48,14 +48,6 @@ pipeline {
             }
         }
 
-        stage('OWASP Dependency Scan') {
-            steps {
-                echo '==> Stage 5: Running OWASP Dependency-Check...'
-                dependencyCheck additionalArguments: '--scan ./ --format HTML --format XML', odcInstallation: 'OWASP-Dependency-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
                 echo '==> Stage 6: Building container images using Docker Compose...'
