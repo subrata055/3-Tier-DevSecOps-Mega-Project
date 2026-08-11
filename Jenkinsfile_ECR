@@ -3,9 +3,8 @@ pipeline {
 
     environment {
         PATH = "/usr/local/bin:/usr/bin:/bin:${env.PATH}"
-        AWS_REGION = "us-east-1"                     // Update with your AWS Region
-        ECR_REGISTRY = "123456789012.dkr.ecr.us-east-1.amazonaws.com" // Update with your AWS Account ID & Region
-        AWS_CREDENTIALS_ID = "aws-ecr-credentials"   // Jenkins AWS Credential ID (Secret Text / AWS Credentials)
+        AWS_REGION = "us-east-1"
+        ECR_REGISTRY = "905418278789.dkr.ecr.us-east-1.amazonaws.com"
     }
 
     stages {
@@ -18,7 +17,7 @@ pipeline {
 
         stage('Trivy FS Scan') {
             steps {
-                echo '==> Stage 2: Scanning source code repository with Trivy...'
+                echo '==> Stage 2: Scanning repository filesystem with Trivy...'
                 sh 'trivy fs --severity HIGH,CRITICAL .'
             }
         }
@@ -72,23 +71,40 @@ pipeline {
             }
         }
 
-        stage('Push to ECR') {
+stage('Push to ECR') {
             steps {
-                echo '==> Stage 8: Tagging and pushing images to AWS ECR...'
+                echo '==> Stage 8: Authenticating and Pushing Images to AWS ECR...'
                 script {
-                    // Authenticate Docker with AWS ECR
+                    // 1. Authenticate Docker with AWS ECR via IAM Role
                     sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                     
-                    // Tag Images for ECR
+                    // 2. Tag local images to match ECR repository URIs
                     sh "docker tag 3-tier-devsecops-mega-project-frontend:latest ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
                     sh "docker tag 3-tier-devsecops-mega-project-backend:latest ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+                    sh "docker tag mysql:8.0 ${ECR_REGISTRY}/mysql:latest" // Or mysql:latest depending on the tag in your docker-compose.yml
                     
-                    // Push Images to ECR
+                    // 3. Push all 3 images to ECR
                     sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
                     sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+                    sh "docker push ${ECR_REGISTRY}/mysql:latest"
                 }
             }
         }
+        stage('Clean Old Container') {
+            steps {
+                echo '==> Stage 9: Stopping and removing old container instances...'
+                sh 'docker compose down --volumes --remove-orphans || true'
+            }
+        }
+
+        stage('Deployment') {
+            steps {
+                echo '==> Stage 10: Deploying new containers locally...'
+                sh 'docker compose up -d'
+                sh 'docker compose ps'
+            }
+        }
+    }
 
     post {
         always {
