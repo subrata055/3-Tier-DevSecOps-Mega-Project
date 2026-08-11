@@ -64,24 +64,24 @@ pipeline {
         }
 
 stage('Push to ECR') {
-            steps {
-                echo '==> Stage 8: Authenticating and Pushing Images to AWS ECR...'
-                script {
-                    // 1. Authenticate Docker with AWS ECR via IAM Role
-                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                    
-                    // 2. Tag local images to match ECR repository URIs
-                    sh "docker tag 3-tier-devsecops-mega-project-frontend:latest ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
-                    sh "docker tag 3-tier-devsecops-mega-project-backend:latest ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
-                    sh "docker tag mysql:8.0 ${ECR_REGISTRY}/mysql:latest" // Or mysql:latest depending on the tag in your docker-compose.yml
-                    
-                    // 3. Push all 3 images to ECR
-                    sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
-                    sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
-                    sh "docker push ${ECR_REGISTRY}/mysql:latest"
-                }
-            }
+    steps {
+        echo '==> Stage 8: Authenticating and Pushing Images to AWS ECR...'
+        script {
+            // 1. Authenticate Docker with AWS ECR via IAM Role
+            sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+            
+            // 2. Tag local images to match ECR repository URIs
+            sh "docker tag 3-tier-devsecops-mega-project-frontend:latest ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
+            sh "docker tag 3-tier-devsecops-mega-project-backend:latest ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+            sh "docker tag mysql:8 ${ECR_REGISTRY}/mysql:latest"
+            
+            // 3. Push images to ECR
+            sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
+            sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+            sh "docker push ${ECR_REGISTRY}/mysql:latest"
         }
+    }
+}
         stage('Clean Old Container') {
             steps {
                 echo '==> Stage 9: Stopping and removing old container instances...'
