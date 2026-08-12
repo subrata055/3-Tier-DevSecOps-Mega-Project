@@ -50,6 +50,7 @@ pipeline {
                     // 2. Tag local images to match ECR repository URIs
                     sh "docker tag 3-tier-devsecops-mega-project-frontend:latest ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
                     sh "docker tag 3-tier-devsecops-mega-project-backend:latest ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+                    sh "docker pull mysql:8"
                     sh "docker tag mysql:8 ${ECR_REGISTRY}/mysql:latest"
 
                     // 3. Push images to ECR
