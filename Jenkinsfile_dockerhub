@@ -1,0 +1,148 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_USERNAME = "subratasikdar2021"
+
+        FRONTEND_IMAGE = "subratasikdar2021/3-tier-devsecops-frontend"
+        BACKEND_IMAGE  = "subratasikdar2021/3-tier-devsecops-backend"
+        MYSQL_IMAGE    = "subratasikdar2021/mysql"
+    }
+
+    stages {
+
+        stage('Git Checkout') {
+            steps {
+                echo '==> Stage 1: Checking out source code...'
+                checkout scm
+            }
+        }
+
+        stage('Trivy Filesystem Scan') {
+            steps {
+                echo '==> Stage 2: Scanning source code with Trivy...'
+                sh 'trivy fs --severity HIGH,CRITICAL . || true'
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                echo '==> Stage 3: Building application Docker images...'
+
+                sh 'docker compose build'
+            }
+        }
+
+        stage('Pull MySQL Image') {
+            steps {
+                echo '==> Stage 4: Pulling MySQL 8 image...'
+
+                sh 'docker pull mysql:8'
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                echo '==> Stage 5: Scanning Docker images with Trivy...'
+
+                sh "trivy image --severity HIGH,CRITICAL ${FRONTEND_IMAGE}:latest || true"
+                sh "trivy image --severity HIGH,CRITICAL ${BACKEND_IMAGE}:latest || true"
+                sh 'trivy image --severity HIGH,CRITICAL mysql:8 || true'
+            }
+        }
+
+        stage('Docker Hub Login') {
+            steps {
+                echo '==> Stage 6: Logging into Docker Hub...'
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        echo "$DOCKER_PASSWORD" | docker login \
+                            --username "$DOCKER_USERNAME" \
+                            --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Tag Docker Images') {
+            steps {
+                echo '==> Stage 7: Tagging Docker images...'
+
+                sh """
+                    docker tag 3-tier-devsecops-mega-project-frontend:latest ${FRONTEND_IMAGE}:latest
+                    docker tag 3-tier-devsecops-mega-project-frontend:latest ${FRONTEND_IMAGE}:build-${BUILD_NUMBER}
+
+                    docker tag 3-tier-devsecops-mega-project-backend:latest ${BACKEND_IMAGE}:latest
+                    docker tag 3-tier-devsecops-mega-project-backend:latest ${BACKEND_IMAGE}:build-${BUILD_NUMBER}
+
+                    docker tag mysql:8 ${MYSQL_IMAGE}:latest
+                    docker tag mysql:8 ${MYSQL_IMAGE}:build-${BUILD_NUMBER}
+                """
+            }
+        }
+
+        stage('Push Images to Docker Hub') {
+            steps {
+                echo '==> Stage 8: Pushing images to Docker Hub...'
+
+                sh """
+                    docker push ${FRONTEND_IMAGE}:latest
+                    docker push ${FRONTEND_IMAGE}:build-${BUILD_NUMBER}
+
+                    docker push ${BACKEND_IMAGE}:latest
+                    docker push ${BACKEND_IMAGE}:build-${BUILD_NUMBER}
+
+                    docker push ${MYSQL_IMAGE}:latest
+                    docker push ${MYSQL_IMAGE}:build-${BUILD_NUMBER}
+                """
+            }
+        }
+
+        stage('Docker Image Summary') {
+            steps {
+                echo '==> Stage 9: Docker Hub images pushed successfully.'
+
+                sh """
+                    echo "Frontend:"
+                    echo "${FRONTEND_IMAGE}:latest"
+                    echo "${FRONTEND_IMAGE}:build-${BUILD_NUMBER}"
+
+                    echo ""
+                    echo "Backend:"
+                    echo "${BACKEND_IMAGE}:latest"
+                    echo "${BACKEND_IMAGE}:build-${BUILD_NUMBER}"
+
+                    echo ""
+                    echo "MySQL:"
+                    echo "${MYSQL_IMAGE}:latest"
+                    echo "${MYSQL_IMAGE}:build-${BUILD_NUMBER}"
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '==> Cleaning unused Docker images...'
+
+            sh 'docker image prune -f || true'
+
+            sh 'docker logout || true'
+        }
+
+        success {
+            echo '==> Docker Hub image push completed successfully!'
+        }
+
+        failure {
+            echo '==> Docker Hub pipeline failed!'
+        }
+    }
+}
