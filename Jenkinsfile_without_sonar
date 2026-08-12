@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+
+    environment {
+        PATH = "/usr/local/bin:/usr/bin:/bin:${env.PATH}"
+        AWS_REGION = "us-east-1"
+        ECR_REGISTRY = "905418278789.dkr.ecr.us-east-1.amazonaws.com"
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                echo '==> Stage 1: Checking out code from repository...'
+                checkout scm
+            }
+        }
+
+        stage('Trivy FS Scan') {
+            steps {
+                echo '==> Stage 2: Scanning repository filesystem with Trivy...'
+                sh 'trivy fs --severity HIGH,CRITICAL .'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo '==> Stage 6: Building container images using Docker Compose...'
+                sh 'docker compose build'
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                echo '==> Stage 7: Scanning built Docker images with Trivy...'
+                sh 'trivy image --severity HIGH,CRITICAL 3-tier-devsecops-mega-project-frontend:latest || true'
+                sh 'trivy image --severity HIGH,CRITICAL 3-tier-devsecops-mega-project-backend:latest || true'
+            }
+        }
+
+stage('Push to ECR') {
+    steps {
+        echo '==> Stage 8: Authenticating and Pushing Images to AWS ECR...'
+        script {
+            // 1. Authenticate Docker with AWS ECR via IAM Role
+            sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+            
+            // 2. Tag local images to match ECR repository URIs
+            sh "docker tag 3-tier-devsecops-mega-project-frontend:latest ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
+            sh "docker tag 3-tier-devsecops-mega-project-backend:latest ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+            sh "docker tag mysql:8 ${ECR_REGISTRY}/mysql:latest"
+            
+            // 3. Push images to ECR
+            sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-frontend:latest"
+            sh "docker push ${ECR_REGISTRY}/3-tier-devsecops-backend:latest"
+            sh "docker push ${ECR_REGISTRY}/mysql:latest"
+        }
+    }
+}
+
+    post {
+        always {
+            echo '==> Cleaning up dangling/intermediate build images...'
+            sh 'docker image prune -f || true'
+        }
+        failure {
+            echo '==> Deployment failed! Fetching container logs...'
+            sh 'docker compose logs --tail=50'
+        }
+    }
+}
