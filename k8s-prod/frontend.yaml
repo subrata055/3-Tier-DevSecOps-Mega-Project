@@ -1,13 +1,12 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
-  namespace: prod
+  namespace: three-tier-app
   labels:
     app: frontend
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: frontend
@@ -18,19 +17,24 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: subratasikdar2021/frontend:latest
+          image: subratasikdar2021/3-tier-devsecops-frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
+              name: frontend
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend-svc
-  namespace: prod
-spec:
-  selector:
+  namespace: three-tier-app
+  labels:
     app: frontend
+spec:
+  type: LoadBalancer
   ports:
     - port: 80
       targetPort: 80
-  type: ClusterIP
+      name: http
+  selector:
+    app: frontend
