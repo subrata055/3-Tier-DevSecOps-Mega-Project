@@ -1,9 +1,8 @@
-# Configures prod-cluster, the OIDC provider, a launch template enforcing gp3 volume types, and a Spot Instance Node Group (1 node):
 # EKS Control Plane
 resource "aws_eks_cluster" "main" {
   name     = "prod-cluster"
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.30"
+  version  = var.eks_version
 
   vpc_config {
     subnet_ids              = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
@@ -29,14 +28,14 @@ resource "aws_iam_openid_connect_provider" "eks" {
   }
 }
 
-# Launch Template to specify gp3 root volume for nodes
+# Launch Template with dynamic gp3 disk size
 resource "aws_launch_template" "eks_nodes" {
   name_prefix = "prod-cluster-node-lt-"
 
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
-      volume_size           = 20
+      volume_size           = var.node_disk_size_gb
       volume_type           = "gp3"
       delete_on_termination = true
     }
@@ -45,25 +44,25 @@ resource "aws_launch_template" "eks_nodes" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "prod-cluster-spot-node"
+      Name = "prod-cluster-node"
     }
   }
 }
 
-# Spot Managed Node Group (1 node)
+# Node Group with dynamic scaling and spot/on-demand selection
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "prod-cluster-spot-nodes"
+  node_group_name = "prod-cluster-nodes"
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = aws_subnet.private[*].id
 
-  capacity_type  = "SPOT"
-  instance_types = ["t3.medium"]
+  capacity_type  = var.node_capacity_type
+  instance_types = [var.node_instance_type]
 
   scaling_config {
-    desired_size = 1
-    max_size     = 2
-    min_size     = 1
+    desired_size = var.node_desired_size
+    max_size     = var.node_max_size
+    min_size     = var.node_min_size
   }
 
   launch_template {
