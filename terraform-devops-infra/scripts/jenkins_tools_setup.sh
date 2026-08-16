@@ -37,16 +37,6 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 systemctl enable docker
 systemctl start docker
 
-echo "================== [4/7] Jenkins =================="
-install -m 0755 -d /usr/share/keyrings
-curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-
-apt-get update -y
-apt-get install -y jenkins
-systemctl enable jenkins
-systemctl start jenkins
-
 echo "================== [5/7] Trivy =================="
 curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /usr/share/keyrings/trivy.gpg
 echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/trivy.list > /dev/null
@@ -76,4 +66,4 @@ rm -f /tmp/eksctl
 echo "================== [7/7] Permissions & Service Restarts =================="
 usermod -aG docker jenkins
 usermod -aG docker ubuntu || true
-systemctl restart jenkins
+
