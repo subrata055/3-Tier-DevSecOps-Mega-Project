@@ -1,17 +1,17 @@
 output "jenkins_ip" {
-  value = aws_instance.jenkins.public_ip
+  value = try(aws_instance.jenkins[0].public_ip, "Jenkins server not created")
 }
 
 output "jenkins_url" {
-  value = "http://${aws_instance.jenkins.public_ip}:8080"
+  value = try("http://${aws_instance.jenkins[0].public_ip}:8080", "Jenkins server not created")
 }
 
 output "sonarqube_ip" {
-  value = aws_instance.sonarqube.public_ip
+  value = try(aws_instance.sonarqube[0].public_ip, "SonarQube server not created")
 }
 
 output "sonarqube_url" {
-  value = "http://${aws_instance.sonarqube.public_ip}:9000"
+  value = try("http://${aws_instance.sonarqube[0].public_ip}:9000", "SonarQube server not created")
 }
 
 output "eks_cluster_name" {
