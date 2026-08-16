@@ -7,8 +7,9 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# Jenkins Instance (t3.medium, gp3 20GB root disk)
+# Jenkins Instance
 resource "aws_instance" "jenkins" {
+  count                  = var.enable_jenkins ? 1 : 0
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t3.medium"
   subnet_id              = aws_subnet.public[0].id
@@ -26,8 +27,9 @@ resource "aws_instance" "jenkins" {
   }
 }
 
-# SonarQube Instance (t3.medium, gp3 20GB root disk)
+# SonarQube Instance
 resource "aws_instance" "sonarqube" {
+  count                  = var.enable_sonarqube ? 1 : 0
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t3.medium"
   subnet_id              = aws_subnet.public[1].id
