@@ -1,76 +1,43 @@
----
 apiVersion: v1
 kind: Secret
 metadata:
   name: mysql-secret
-  namespace: prod
-  labels:
-    app: mysql
+  namespace: three-tier-app
 type: Opaque
 stringData:
-  MYSQL_ROOT_PASSWORD: Aditya
-
+  MYSQL_ROOT_PASSWORD: "RootPassword@123"
+  MYSQL_PASSWORD: "DbPassword@123"
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mysql-config
-  namespace: prod
-  labels:
-    app: mysql
+  namespace: three-tier-app
 data:
-  MYSQL_DATABASE: crud_app
-
+  MYSQL_DATABASE: "appdb"
+  MYSQL_USER: "dbuser"
 ---
 apiVersion: v1
-kind: ConfigMap
+kind: PersistentVolumeClaim
 metadata:
-  name: mysql-initdb-config
-  namespace: prod
-  labels:
-    app: mysql
-data:
-  init.sql: |
-    CREATE DATABASE IF NOT EXISTS crud_app;
-
-    USE crud_app;
-
-    CREATE TABLE IF NOT EXISTS users (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      email VARCHAR(255) NOT NULL UNIQUE,
-      password VARCHAR(255) NOT NULL,
-      role ENUM('admin', 'viewer') NOT NULL DEFAULT 'viewer',
-      is_active TINYINT(1) DEFAULT 1,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: mysql
-  namespace: prod
-  labels:
-    app: mysql
+  name: mysql-pvc
+  namespace: three-tier-app
 spec:
-  clusterIP: None
-  selector:
-    app: mysql
-  ports:
-    - port: 3306
-      targetPort: 3306
-
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp2
+  resources:
+    requests:
+      storage: 10Gi
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: mysql
-  namespace: prod
+  namespace: three-tier-app
   labels:
     app: mysql
 spec:
-  serviceName: mysql
   replicas: 1
   selector:
     matchLabels:
@@ -82,35 +49,52 @@ spec:
     spec:
       containers:
         - name: mysql
-          image: mysql:8
+          image: subratasikdar2021/mysql:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3306
+              name: mysql
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql-secret
                   key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
             - name: MYSQL_DATABASE
               valueFrom:
                 configMapKeyRef:
                   name: mysql-config
                   key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-config
+                  key: MYSQL_USER
           volumeMounts:
-            - name: mysql-persistent-storage
+            - name: mysql-storage
               mountPath: /var/lib/mysql
-            - name: initdb
-              mountPath: /docker-entrypoint-initdb.d
       volumes:
-        - name: initdb
-          configMap:
-            name: mysql-initdb-config
-  volumeClaimTemplates:
-    - metadata:
-        name: mysql-persistent-storage
-      spec:
-        accessModes: [ "ReadWriteOnce" ]
-        storageClassName: ebs-sc
-        resources:
-          requests:
-            storage: 5Gi
+        - name: mysql-storage
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: three-tier-app
+  labels:
+    app: mysql
+spec:
+  ports:
+    - port: 3306
+      targetPort: 3306
+      name: mysql
+  selector:
+    app: mysql
+  clusterIP: None
