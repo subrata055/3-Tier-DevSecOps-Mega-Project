@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: backend
   namespace: three-tier-app
-  labels:
-    app: backend
 spec:
   replicas: 1
   selector:
@@ -18,10 +16,8 @@ spec:
       containers:
         - name: backend
           image: subratasikdar2021/3-tier-devsecops-backend:latest
-          imagePullPolicy: Always
           ports:
             - containerPort: 8080
-              name: backend
           env:
             - name: DB_HOST
               value: "mysql"
@@ -46,13 +42,10 @@ kind: Service
 metadata:
   name: backend-svc
   namespace: three-tier-app
-  labels:
-    app: backend
 spec:
   type: ClusterIP
   ports:
     - port: 8080
       targetPort: 8080
-      name: http
   selector:
     app: backend
