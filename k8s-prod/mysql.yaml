@@ -18,6 +18,23 @@ data:
   MYSQL_USER: "dbuser"
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-initdb-config
+  namespace: three-tier-app
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS appdb;
+    USE appdb;
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO users (name, email) VALUES ('Admin', 'admin@cloudacademy.website') ON DUPLICATE KEY UPDATE id=id;
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mysql-pvc
@@ -74,10 +91,15 @@ spec:
           volumeMounts:
             - name: mysql-storage
               mountPath: /var/lib/mysql
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
       volumes:
         - name: mysql-storage
           persistentVolumeClaim:
             claimName: mysql-pvc
+        - name: initdb
+          configMap:
+            name: mysql-initdb-config
 ---
 apiVersion: v1
 kind: Service
