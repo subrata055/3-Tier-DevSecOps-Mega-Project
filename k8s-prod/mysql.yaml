@@ -42,7 +42,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: gp3
+  storageClassName: ebs-gp3-sc # Fixed: Matched to sc.yaml name
   resources:
     requests:
       storage: 10Gi
@@ -54,6 +54,8 @@ metadata:
   namespace: three-tier-app
 spec:
   replicas: 1
+  strategy:
+    type: Recreate # Ensures old pod unmounts EBS volume before new pod starts
   selector:
     matchLabels:
       app: mysql
@@ -92,7 +94,15 @@ spec:
             - name: mysql-storage
               mountPath: /var/lib/mysql
             - name: initdb
-              mountPath: /docker-entrypoint-initdb.d
+              mountPath: /docker-entrypoint-initdb.d/init.sql
+              subPath: init.sql # Mounts specific file without overwriting directory
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
       volumes:
         - name: mysql-storage
           persistentVolumeClaim:
