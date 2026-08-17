@@ -43,3 +43,15 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryReadOn
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
   role       = aws_iam_role.eks_nodes.name
 }
+
+# Policy for AWS Load Balancer Controller to manage 1 shared ALB
+resource "aws_iam_policy" "load_balancer_controller" {
+  name        = "${var.project_name}-AWSLoadBalancerControllerIAMPolicy"
+  description = "Permissions for AWS Load Balancer Controller"
+  policy      = file("${path.module}/iam_alb_policy.json") # Official AWS LBC policy
+}
+
+resource "aws_iam_role_policy_attachment" "node_alb_policy" {
+  policy_arn = aws_iam_policy.load_balancer_controller.arn
+  role       = aws_iam_role.eks_nodes.name
+}
