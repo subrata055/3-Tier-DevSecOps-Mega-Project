@@ -102,7 +102,7 @@ resource "aws_eks_addon" "ebs_csi" {
 }
 
 # ==========================================================
-# 5. LAUNCH TEMPLATE (gp3 Disk Configuration)
+# 5. LAUNCH TEMPLATE (gp3 Disk + IMDSv2 Hop Limit = 2)
 # ==========================================================
 resource "aws_launch_template" "eks_nodes" {
   name_prefix = "prod-cluster-node-lt-"
@@ -116,11 +116,22 @@ resource "aws_launch_template" "eks_nodes" {
     }
   }
 
+  # --- FIX: Allows Load Balancer Controller pod to access IMDS ---
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" # IMDSv2
+    http_put_response_hop_limit = 2          # Enables container pods to retrieve IAM node role
+  }
+
   tag_specifications {
     resource_type = "instance"
     tags = {
       Name = "prod-cluster-node"
     }
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -137,7 +148,7 @@ resource "aws_eks_node_group" "main" {
   instance_types = [var.node_instance_type]
 
   scaling_config {
-    desired_size = var.node_desired_size
+    desired_size = var.node_desired_size # Ensure default is at least 2 in terraform.tfvars
     max_size     = var.node_max_size
     min_size     = var.node_min_size
   }
