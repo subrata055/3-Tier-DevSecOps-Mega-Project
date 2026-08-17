@@ -35,8 +35,6 @@ kind: Deployment
 metadata:
   name: mysql
   namespace: three-tier-app
-  labels:
-    app: mysql
 spec:
   replicas: 1
   selector:
@@ -50,10 +48,8 @@ spec:
       containers:
         - name: mysql
           image: subratasikdar2021/mysql:latest
-          imagePullPolicy: Always
           ports:
             - containerPort: 3306
-              name: mysql
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
@@ -88,13 +84,10 @@ kind: Service
 metadata:
   name: mysql
   namespace: three-tier-app
-  labels:
-    app: mysql
 spec:
   ports:
     - port: 3306
       targetPort: 3306
-      name: mysql
   selector:
     app: mysql
   clusterIP: None
