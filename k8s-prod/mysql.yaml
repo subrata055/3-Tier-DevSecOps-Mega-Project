@@ -30,9 +30,10 @@ data:
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       email VARCHAR(255) NOT NULL UNIQUE,
+      password VARCHAR(255) NOT NULL,
+      role VARCHAR(50) DEFAULT 'viewer',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    INSERT INTO users (name, email) VALUES ('Admin', 'admin@cloudacademy.website') ON DUPLICATE KEY UPDATE id=id;
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -42,7 +43,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: ebs-gp3-sc # Fixed: Matched to sc.yaml name
+  storageClassName: ebs-gp3-sc
   resources:
     requests:
       storage: 10Gi
@@ -55,7 +56,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate # Ensures old pod unmounts EBS volume before new pod starts
+    type: Recreate
   selector:
     matchLabels:
       app: mysql
@@ -95,7 +96,7 @@ spec:
               mountPath: /var/lib/mysql
             - name: initdb
               mountPath: /docker-entrypoint-initdb.d/init.sql
-              subPath: init.sql # Mounts specific file without overwriting directory
+              subPath: init.sql
           resources:
             requests:
               cpu: "250m"
