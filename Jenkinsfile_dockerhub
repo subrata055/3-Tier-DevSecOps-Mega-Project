@@ -25,6 +25,32 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            steps {
+                echo '==> Stage 3: Running SonarQube Code Scan...'
+                script {
+                    def scannerHome = tool 'SonarScanner'
+                    withSonarQubeEnv('SonarQube-Server') {
+                        sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                echo '==> Stage 4: Checking Quality Gate Status...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    script {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Build Docker Images') {
             steps {
                 echo '==> Stage 3: Building application Docker images...'
