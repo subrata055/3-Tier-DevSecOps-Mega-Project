@@ -4,8 +4,8 @@ project_name = "devsecops-prod"
 key_name     = "3-Tier-DevSecOps"
 
 # Server Deployment Toggles (true = create, false = skip)
-enable_jenkins   = false
-enable_sonarqube = false
+enable_jenkins   = true
+enable_sonarqube = true
 
 # EKS Cluster Configurations
 eks_version          = "1.34"
