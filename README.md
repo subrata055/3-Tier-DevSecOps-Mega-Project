@@ -1,31 +1,286 @@
-# 3-Tier DevSecOps Project
+1. First I need to clone the repository in the server: git clone -b terraform-cd https://github.com/subrata055/3-Tier-DevSecOps-Mega-Project.git
+2. cd 3-Tier-DevSecOps-Mega-Project
+3. docker compose up --build -d
+the project will start running. 
 
-This repository contains a simple Node.js API and a React client used for a user management demo. Follow the steps below to get the project running locally.
+NOW I need to setup jenkins server:
+plugins to install: ocean blue, stage view, sonarqube, 
+1. go to Manage jenkins >> plugins >> available plugins >> search and install >> restart jenkins. 
+2. To create github credentials: Manage jenkins >> credentials >> global credentials >> username password >> give username and give github token insted of password >> create
+3. Add the jenkins user to the docker group: sudo usermod -aG docker jenkins && sudo systemctl restart jenkins
 
-## Setup
+4. create pipeline >> scm >> select the github token >> give repo url >> branch >> Jenkinsfile.
+5. run the build.
 
-1. Install Node.js (version 18 or later is recommended).
-2. Install dependencies for both the API and client:
 
-   ```bash
-   cd api && npm install
-   cd ../client && npm install
-   ```
 
-3. Start the API server:
+Step 1: now we need to setup the sonarqube:
+1. Install sonarqube using docker: 
 
-   ```bash
-   cd api
-   npm start
-   ```
+docker run -d --name sonarqube \
+  -p 9000:9000 \
+  -v sonarqube_data:/opt/sonarqube/data \
+  -v sonarqube_extensions:/opt/sonarqube/extensions \
+  -v sonarqube_logs:/opt/sonarqube/logs \
+  sonarqube:community
 
-4. In a separate terminal, start the React client:
 
-   ```bash
-   cd client
-   npm start
-   ```
+2. Remove the old corrupted volumes: docker volume rm sonarqube_data sonarqube_extensions sonarqube_logs
+3. Access SonarQube at http://<your-ec2-ip>:9000 (Default credentials: username admin, password admin).
+4. Ensure Port 9000 is allowed in your EC2 Security Group.
 
-5. Open `http://localhost:3000` in your browser to use the application.
+Step 2: Generate SonarQube Token & Configure Webhook:
+5. Create Token: In SonarQube, go to User Icon >> My Account >> Security >> Generate Token. Name it "jenkins-token" and copy it.
+6. Setup Webhook (Required for Quality Gate): In SonarQube, go to Administration >> Configuration >> Webhooks >> Create.
+   Name: Jenkins-Webhook
+   URL: http://<your-jenkins-ip>:8080/sonarqube-webhook/
+   Click Create.
 
-The client now displays an animated banner welcoming you to **Cloud Academy**.
+
+Step 3: Configure Jenkins Credentials & Plugins:
+1. Install plugins in Jenkins: SonarQube Scanner and Pipeline Utility Steps (via Manage Jenkins > Plugins).
+2. Save Token in Jenkins: Go to Manage Jenkins >> Credentials >> System >> Global credentials >> Add Credentials.
+3. Kind: Secret text  >> Secret: Paste your SonarQube token >> ID: sq-token
+
+4. Link SonarQube Server in Jenkins: Go to Manage Jenkins >> System (or Configure System).
+5. Scroll down to SonarQube servers >> Check Environment variables >> Click Add SonarQube 
+   Name: SonarQube-Server (Must match the name used in your Jenkinsfile)
+   Server URL: http://localhost:9000 (or http://<your-ec2-ip>:9000)
+   Server authentication token: Select sq-token
+
+6. Register Scanner Tool: Go to Manage Jenkins >> Tools
+7. Scroll to SonarQube Scanner >> Click Add SonarQube Scanner >> Name: SonarScanner (Must match the tool name in your Jenkinsfile) >>  Check Install automatically.
+
+
+##############################################################################################################################
+#     EKS CLUSTER SETUP argocd, promethus, grafana, and deploy the application
+#
+##############################################################################################################################
+
+1. Configure kubectl Context:
+aws eks update-kubeconfig --name prod-cluster --region us-east-1
+kubectl get nodes
+
+2. Update the IMDS Hop Limit to 2 on Worker Nodes:
+
+for id in $(aws ec2 describe-instances \
+  --filters "Name=tag:aws:eks:cluster-name,Values=prod-cluster" "Name=instance-state-name,Values=running" \
+  --query "Reservations[*].Instances[*].InstanceId" \
+  --output text \
+  --region us-east-1); do
+    echo "Updating IMDSv2 hop limit to 2 for instance: $id"
+    aws ec2 modify-instance-metadata-options \
+      --instance-id "$id" \
+      --http-put-response-hop-limit 2 \
+      --http-endpoint enabled \
+      --region us-east-1
+done
+
+3. First I need to install argo cd in eks cluster:
+kubectl create namespace argocd
+kubectl create namespace three-tier-app
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+4: Patch ArgoCD Server for Plaintext HTTP
+kubectl patch deployment argocd-server -n argocd --type='json' -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--insecure"}]' 2>/dev/null || \
+kubectl set args deployment/argocd-server -n argocd --argocd-server --insecure
+
+5. Create ServiceAccount and alb controller in kube-system: 
+# Create ServiceAccount
+kubectl create serviceaccount aws-load-balancer-controller -n kube-system --dry-run=client -o yaml | kubectl apply -f -
+
+# Fetch VPC ID
+VPC_ID=$(aws eks describe-cluster --name prod-cluster --region us-east-1 --query "cluster.resourcesVpcConfig.vpcId" --output text)
+
+# Install/Upgrade Helm chart
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+helm upgrade -i aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=prod-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region=us-east-1 \
+  --set vpcId=$VPC_ID
+
+
+# 6. Verify pod health
+kubectl rollout status deployment aws-load-balancer-controller -n kube-system
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+
+
+7. Verify Controller Health: 
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+
+Restart the AWS Load Balancer Controller Pod:
+kubectl rollout restart deployment aws-load-balancer-controller -n kube-system
+
+8. Deploy Shared Ingress Rules:
+kubectl apply -f k8s-prod/ingress.yaml
+kubectl apply -f k8s-prod/argocd-ingress.yaml
+
+9. Fix Security Groups (ALB -> Worker Node Traffic):
+# 1. Fetch ALB SG
+ALB_SG=$(aws elbv2 describe-load-balancers \
+  --names "k8s-sharedalb-5921846bb1" \
+  --region us-east-1 \
+  --query "LoadBalancers[0].SecurityGroups[0]" \
+  --output text)
+
+# 2. Fetch Node SG
+NODE_SG=$(aws ec2 describe-instances \
+  --filters "Name=tag:aws:eks:cluster-name,Values=prod-cluster" "Name=instance-state-name,Values=running" \
+  --query "Reservations[0].Instances[0].SecurityGroups[0].GroupId" \
+  --output text \
+  --region us-east-1)
+
+# 3. Authorize traffic from ALB SG and VPC CIDR into Node SG
+aws ec2 authorize-security-group-ingress --group-id "$NODE_SG" --protocol -1 --source-group "$ALB_SG" --region us-east-1 2>/dev/null || true
+aws ec2 authorize-security-group-ingress --group-id "$NODE_SG" --protocol -1 --cidr "10.0.0.0/16" --region us-east-1 2>/dev/null || true
+
+
+10. Retrieve the Load Balancer Hostname:
+kubectl get ingress -A
+kubectl get ingress -A -w
+
+11. Verify Target Health & Get Admin Credentials:
+for tg in $(aws elbv2 describe-target-groups --query "TargetGroups[*].TargetGroupArn" --output text --region us-east-1); do
+  echo "--- Checking Target Group: $tg ---"
+  aws elbv2 describe-target-health --target-group-arn "$tg" --region us-east-1 \
+    --query "TargetHealthDescriptions[*].{Target:Target.Id,Port:Target.Port,State:TargetHealth.State,Reason:TargetHealth.Reason}" \
+    --output table
+done
+
+12. argocd password: 
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo
+
+13. Configure DNS Records
+In your GoDaddy DNS dashboard, map your domain names to the retrieved ALB DNS endpoint:
+
+CNAME Records: Point argocd, www, grafana, and prometheus to k8s-sharedalb-...us-east-1.elb.amazonaws.com.
+
+Root Domain Forwarding: Forward the apex root domain (@) directly to www.cloudacademy.website.
+
+14. Retrieve ArgoCD Admin Password & URL:
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+kubectl get svc argocd-server -n argocd
+
+15. now in K8s-prod folder and create a file:argocd-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: three-tier-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/subrata055/3-Tier-DevSecOps-Mega-Project.git'
+    targetRevision: terraform-cd
+    path: k8s-prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: three-tier-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+
+16. Now deploy the argocd app:
+kubectl apply -f argocd-application.yaml
+
+
+17. Hard refresh ArgoCD application state from Git
+kubectl patch application three-tier-app -n argocd --type merge -p '{"operation": {"sync": {"prune": true, "syncStrategy": {"hook": {}}}}}'
+
+18. Watch the pods transition to Running:
+kubectl get pods -n three-tier-app -w
+
+19. verify application access: 
+kubectl get svc frontend-svc -n three-tier-app
+
+20. Check the Backend Application Crash Logs: 
+kubectl logs backend-5cdb4bc5c9-w2v59 -n three-tier-app --tail=50
+
+21. Check Why the New Pod is Pending:
+kubectl describe pod backend-68b69cc6-j66sk -n three-tier-app | grep -A 5 "Events:"
+
+################################################################################
+Monitoring
+#############################################################################
+
+22: Add the Prometheus Community Helm Repo:
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+23. Install the kube-prometheus-stack: (Prometheus, Grafana, Alertmanager, Node Exporter, kube-state-metrics):
+
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+helm upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  -n monitoring \
+  --set grafana.adminPassword="AdminPassword123!" \
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+
+
+24. Confirm all monitoring pods are running:
+kubectl get pods -n monitoring
+
+25. Confirm the Ingress addresses have attached to the shared ALB:
+kubectl get ingress -n monitoring
+
+26. http://grafana.cloudacademy.website
+User: admin
+Password: AdminPassword123!
+
+27. In Grafana, click the gear icon (Connections) in the left sidebar >> Data sources.
+28. click on view configure data source >> select promethus (default) >> click test
+29. For Pre-Installed Dashboards: Dashboards >> Browse
+30. Open the Kubernetes / Compute Resources folder >> 
+    Kubernetes / Compute Resources / Cluster: Overall CPU, Memory, and Network usage of the EKS cluster.
+    Kubernetes / Compute Resources / Namespace (Pods): Select three-tier-app or argocd to monitor pod-level resource consumption.
+    Node Exporter / Nodes: Hardware performance metrics for your EC2 worker nodes.
+
+
+31. Import Community Production Dashboards (Recommended):
+    Dashboards >> New >> Import.
+    1: Node Exporter Full (Node CPU, RAM, Disk, IOPS):
+    Enter Dashboard ID: 1860
+    Under the Prometheus dropdown at the bottom, select Prometheus >> Click Import.
+
+32. Other ID we can import: 12740, 15757, 15759, 15760
+
+33. Create a Custom Metrics Panel for Your 3-Tier Application: 
+33.1. Dashboards >> New >> New Dashboard >> Add visualization >> Select the Prometheus data source.
+33.2. Under the Query tab, paste a PromQL query:
+33.3. sum(rate(container_cpu_usage_seconds_total{namespace="three-tier-app"}[5m])) by (pod)
+33.4. On the right panel, set the panel title to App Pods CPU Usage.
+33.5. Under Graph styles, choose Time series
+33.6. Click Apply in the top right corner, then click the Save icon at the top.
+
+###############################################################################################
+# custom Dashboard creation
+###############################################################################################
+
+34. Dashboards >> New >> Import
+34.1. Paste the following JSON directly(graphana-dashboard.json) into the Import via panel json box and click Load:
+34.2. done. 
+ can create other custom dashboard using chatgpt.
+
+
+###################################################################################################
+#### Terraform Destroy
+#################################################################################################
+Before running terraform destroy command clean these things: 
+# 1. Delete all Ingresses to release the AWS ALB and Target Groups
+kubectl delete ingress -A --all
+
+# 2. Delete the namespaces to release PVs and EBS Volumes
+kubectl delete namespace three-tier-app
+kubectl delete namespace monitoring
+kubectl delete namespace argocd
+
+# 3. Wait 1-2 minutes for AWS to drain targets, then destroy Terraform infrastructure
+terraform destroy -auto-approve
